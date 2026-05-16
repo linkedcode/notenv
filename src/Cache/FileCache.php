@@ -27,4 +27,11 @@ final class FileCache
         $content = "<?php\n\nreturn " . var_export($config, true) . ";\n";
         file_put_contents($this->file, $content);
     }
+
+    public function clear(): void
+    {
+        if (file_exists($this->file)) {
+            file_put_contents($this->file, "<?php\n\nreturn [];\n");
+        }
+    }
 }

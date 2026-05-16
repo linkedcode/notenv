@@ -8,6 +8,16 @@ final class Loader
 {
     public static function load(string $basePath): Config
     {
+        return self::buildConfig($basePath, false);
+    }
+
+    public static function reload(string $basePath): Config
+    {
+        return self::buildConfig($basePath, true);
+    }
+
+    private static function buildConfig(string $basePath, bool $force): Config
+    {
         $configPath = rtrim($basePath, '/') . '/config';
         $cachePath  = rtrim($basePath, '/') . '/var/cache';
 
@@ -22,7 +32,7 @@ final class Loader
         }
 
         $cache = new FileCache($cachePath, 'config');
-        if ($cache->exists()) {
+        if (!$force && $cache->exists()) {
             return new Config($cache->load());
         }
 
