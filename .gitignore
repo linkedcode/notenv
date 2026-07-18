@@ -1,3 +1,4 @@
 *.code-workspace
 vendor/
 tests/var/
+.phpunit.result.cache

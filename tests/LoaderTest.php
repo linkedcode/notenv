@@ -7,19 +7,23 @@ use Linkedcode\NotEnv\Config;
 final class LoaderTest extends TestCase
 {
     private string $configPath;
+    private string $cacheFile;
 
     protected function setUp(): void
     {
         $this->configPath = __DIR__ . '/config';
-        // Limpiamos cache si existe
-        $cacheFile = __DIR__ . '/cache/config.php';
-        if (file_exists($cacheFile)) unlink($cacheFile);
-        if (!is_dir(__DIR__ . '/cache')) mkdir(__DIR__ . '/cache', 0777, true);
+        $this->cacheFile = __DIR__ . '/var/cache/config.php';
+        if (file_exists($this->cacheFile)) unlink($this->cacheFile);
+    }
+
+    protected function tearDown(): void
+    {
+        if (file_exists($this->cacheFile)) unlink($this->cacheFile);
     }
 
     public function testLoaderMergeAndCache(): void
     {
-        $config = Loader::load(__DIR__); // usa tests/config + tests/cache
+        $config = Loader::load(__DIR__); // usa tests/config + tests/var/cache
         $this->assertInstanceOf(Config::class, $config);
 
         $this->assertEquals('TestApp', $config->get('app.name'));      // common
@@ -28,17 +32,49 @@ final class LoaderTest extends TestCase
         $this->assertEquals(3306, $config->get('database.port'));
 
         // Cache generado
-        $this->assertFileExists(__DIR__ . '/var/cache/config.php');
+        $this->assertFileExists($this->cacheFile);
 
         // Carga desde cache
         $configCached = Loader::load(__DIR__);
         $this->assertEquals($config->all(), $configCached->all());
     }
 
-    protected function tearDown(): void
+    public function testLoadUsesCacheInsteadOfRereadingSources(): void
     {
-        // Limpiamos cache
-        $cacheFile = __DIR__ . '/cache/config.php';
-        if (file_exists($cacheFile)) unlink($cacheFile);
+        Loader::load(__DIR__); // genera el cache real
+
+        // Corrompemos el cache manualmente para verificar que load() lo usa tal cual
+        file_put_contents($this->cacheFile, "<?php\n\nreturn ['from' => 'cache'];\n");
+
+        $config = Loader::load(__DIR__);
+
+        $this->assertEquals(['from' => 'cache'], $config->all());
+    }
+
+    public function testReloadForcesRewriteOfCache(): void
+    {
+        Loader::load(__DIR__);
+        file_put_contents($this->cacheFile, "<?php\n\nreturn ['from' => 'stale-cache'];\n");
+
+        $config = Loader::reload(__DIR__);
+
+        $this->assertEquals('TestApp', $config->get('app.name'));
+        $this->assertEquals('TestApp', Loader::load(__DIR__)->get('app.name'));
+    }
+
+    public function testThrowsWhenCommonFileMissing(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('common.php no encontrado');
+
+        Loader::load(__DIR__ . '/fixtures/missing-common');
+    }
+
+    public function testThrowsWhenActiveConfigFileMissing(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('config.php no encontrado');
+
+        Loader::load(__DIR__ . '/fixtures/missing-config');
     }
 }
