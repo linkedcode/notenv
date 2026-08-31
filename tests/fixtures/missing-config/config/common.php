@@ -1,2 +1,6 @@
 <?php
-return [];
+return [
+    'app' => [
+        'name' => 'SoloCommon',
+    ],
+];
