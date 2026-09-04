@@ -18,7 +18,8 @@ require __DIR__.'/vendor/autoload.php';
 
 use Linkedcode\NotEnv\Loader;
 
-$config = Loader::load(__DIR__); // busca config/common.php y config/config.php
+// Busca config/common.php, config/config.<APP_ENV>.php y config/config.php
+$config = Loader::load(__DIR__);
 
 echo $config->get('app.name');           // Resuelve de common.php o de config.php
 echo $config->get('database.host');      // Resuelve de config.php
@@ -26,9 +27,21 @@ echo $config->get('database.host');      // Resuelve de config.php
 
 ## Estructura de archivos de configuración
 
-Crea un directorio `config/` en la raíz de tu proyecto:
-1. **`config/common.php`**: Contiene la configuración base por defecto de tu aplicación (valores seguros para desarrollo o producción).
-2. **`config/config.php`**: Archivo local de configuración específica del entorno (base de datos local, llaves de API de desarrollo). **Este archivo debe estar excluido en tu `.gitignore`**. Es **opcional**: si no existe, se usa únicamente `common.php`.
+Crea un directorio `config/` en la raíz de tu proyecto. Se mergean en este orden, de menor a mayor precedencia:
+
+1. **`config/common.php`**: configuración base de la aplicación. Versionado, **obligatorio**. Sin credenciales ni secretos.
+2. **`config/config.<env>.php`**: overrides del entorno, donde `<env>` sale de `APP_ENV`. **Opcional**. Se versiona sólo si no tiene secretos.
+3. **`config/config.php`**: overrides de la máquina (base local, llaves de desarrollo). **Debe estar en tu `.gitignore`**. **Opcional**.
+
+La capa por entorno existe para cuando dos entornos comparten una misma máquina — el caso típico es `dev` y `test`: `config.php` sólo puede describir a uno de los dos, así que la base de tests se declara en `config.test.php`.
+
+`APP_ENV` se lee de `$_ENV` y, si ahí no está, de `getenv()`: son dos almacenes separados y el valor puede llegar por cualquiera de los dos (`$_ENV` sólo se puebla si `variables_order` incluye `"E"`). También se puede pasar explícito:
+
+```php
+$config = Loader::load(__DIR__, 'test');
+```
+
+Si el archivo del entorno no existe, no es un error: simplemente no aporta nada.
 
 Ejemplo de `config/common.php`:
 ```php
@@ -41,6 +54,17 @@ return [
     'database' => [
         'host' => '127.0.0.1',
         'port' => 3306,
+    ],
+];
+```
+
+Ejemplo de `config/config.test.php` (entorno, con `APP_ENV=test`):
+```php
+<?php
+return [
+    'database' => [
+        'port'   => 3307,          // el MySQL efímero de la suite
+        'dbname' => 'app_test',
     ],
 ];
 ```
