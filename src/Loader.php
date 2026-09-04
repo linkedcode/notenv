@@ -4,23 +4,44 @@ namespace Linkedcode\NotEnv;
 
 final class Loader
 {
+    /** Los únicos entornos válidos. */
+    public const ENVIRONMENTS = ['dev', 'test', 'prod'];
+
     /**
-     * Arma la configuración mergeando, en orden de precedencia creciente:
+     * Formas largas que se aceptan por comodidad y se normalizan a la corta.
+     * 'prod' es más breve y se lee igual en castellano que en inglés.
+     */
+    private const ALIASES = [
+        'production'  => 'prod',
+        'develop'     => 'dev',
+        'development' => 'dev',
+        'testing'     => 'test',
+    ];
+
+    /**
+     * Arma la configuración con dos archivos:
      *
-     *   1. config/common.php            base versionada, obligatoria
-     *   2. config/config.<env>.php      overrides del entorno, versionable
-     *   3. config/config.php            overrides de la máquina, en .gitignore
+     *   1. config/common.php         base común, versionada, OBLIGATORIA
+     *   2. config/config.<env>.php   overrides del entorno activo, opcional
      *
-     * Los dos últimos son opcionales. La cascada de dos archivos alcanzaba
-     * mientras cada entorno fuera una máquina distinta; con dev y test
-     * conviviendo en la misma, config.php no puede describir a los dos y hace
-     * falta un archivo por entorno.
+     * common.php es el archivo principal: la configuración de verdad vive ahí,
+     * estructurada y con todas las claves. Es lo que hace innecesario dotenv.
+     * El segundo sólo aporta lo que cambia en ese entorno.
+     *
+     * Se carga UN solo config.<env>.php, el que corresponde a APP_ENV. Los
+     * demás no se leen, así que no pueden pisarse entre sí: un config.dev.php
+     * no puede llevarse puesta la base de config.test.php aunque convivan en
+     * la misma máquina, que es justo el caso que no cubría el viejo
+     * config.php sin sufijo.
      *
      * El entorno sale de APP_ENV salvo que se pase explícito. Se mira $_ENV y
      * también getenv(): $_ENV sólo se puebla si variables_order incluye "E",
      * que no es el default de PHP, y getenv() no ve lo que otro código escribió
      * en $_ENV (como hace phpunit.xml). Son dos almacenes separados y el valor
      * puede estar en cualquiera de los dos.
+     *
+     * @throws \RuntimeException si falta common.php o si el entorno no es uno
+     *                           de ENVIRONMENTS
      */
     public static function load(string $basePath, ?string $env = null): Config
     {
@@ -34,34 +55,46 @@ final class Loader
 
         $config = require $commonFile;
 
-        if ($env === null) {
-            $env = $_ENV['APP_ENV'] ?? null;
+        $envFile = $configPath . '/config.' . self::resolveEnv($env) . '.php';
 
-            if ($env === null || $env === '') {
-                $fromGetenv = getenv('APP_ENV');
-                $env = $fromGetenv === false ? null : $fromGetenv;
-            }
-        }
-
-        $overrides = [];
-
-        // Un APP_ENV vacío o con separadores de path daría nombres de archivo
-        // inesperados: se ignora en vez de intentar cargarlos.
-        if (is_string($env) && $env !== '' && !preg_match('#[/\\\\.]#', $env)) {
-            $overrides[] = "config.{$env}.php";
-        }
-
-        // config.php va último: es la máquina concreta, y pisa al entorno.
-        $overrides[] = 'config.php';
-
-        foreach ($overrides as $file) {
-            $path = $configPath . '/' . $file;
-
-            if (file_exists($path)) {
-                $config = Merger::merge($config, require $path);
-            }
+        if (file_exists($envFile)) {
+            $config = Merger::merge($config, require $envFile);
         }
 
         return new Config($config);
+    }
+
+    /**
+     * Sin APP_ENV el entorno es 'dev': es el único que se usa sin configurar
+     * nada. Un valor desconocido es un error y no un default silencioso --
+     * caer a 'dev' en un servidor dejaría debug activo y cookies inseguras.
+     */
+    public static function resolveEnv(?string $env = null): string
+    {
+        if ($env === null || $env === '') {
+            $env = $_ENV['APP_ENV'] ?? null;
+        }
+
+        if ($env === null || $env === '') {
+            $fromGetenv = getenv('APP_ENV');
+            $env = $fromGetenv === false ? null : $fromGetenv;
+        }
+
+        if ($env === null || $env === '') {
+            return 'dev';
+        }
+
+        $env = strtolower(trim($env));
+        $env = self::ALIASES[$env] ?? $env;
+
+        if (!in_array($env, self::ENVIRONMENTS, true)) {
+            throw new \RuntimeException(sprintf(
+                "APP_ENV inválido: '%s'. Los entornos válidos son: %s.",
+                $env,
+                implode(', ', self::ENVIRONMENTS)
+            ));
+        }
+
+        return $env;
     }
 }

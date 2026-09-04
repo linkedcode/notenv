@@ -32,7 +32,7 @@ final class LoaderTest extends TestCase
         $this->assertInstanceOf(Config::class, $config);
 
         $this->assertEquals('TestApp', $config->get('app.name'));      // common
-        $this->assertTrue($config->get('app.debug'));                  // config.php
+        $this->assertTrue($config->get('app.debug'));                  // config.dev.php
         $this->assertEquals('127.0.0.1', $config->get('database.host'));
         $this->assertEquals(3306, $config->get('database.port'));
     }
@@ -60,14 +60,11 @@ final class LoaderTest extends TestCase
         $this->assertEquals('SoloCommon', $config->get('app.name'));
     }
 
-    public function testEnvFileIsIgnoredWhenNoEnvIsSet(): void
+    public function testDefaultsToDevWhenNoEnvIsSet(): void
     {
         $config = Loader::load(self::CASCADE);
 
-        // Sin APP_ENV no se carga config.test.php: quedan common + config.php.
-        $this->assertEquals('dev', $config->get('app.env'));
-        $this->assertEquals(3306, $config->get('db.port'));
-        $this->assertEquals('cascade', $config->get('db.dbname'));
+        $this->assertEquals('cascade_dev', $config->get('db.dbname'));
     }
 
     public function testEnvFileIsMergedOnTopOfCommon(): void
@@ -79,19 +76,29 @@ final class LoaderTest extends TestCase
         $this->assertEquals('test', $config->get('app.env'));
         $this->assertEquals(3307, $config->get('db.port'));
         $this->assertEquals('cascade_test', $config->get('db.dbname'));
-        // Sin override en ningún lado: sobrevive el de common.
+        // Sin override en ese entorno: sobrevive lo de common.
         $this->assertEquals('Cascade', $config->get('app.name'));
+        $this->assertEquals('localhost', $config->get('db.host'));
     }
 
-    public function testMachineConfigWinsOverEnvFile(): void
+    /**
+     * El punto de todo esto: dev y test conviven en la misma máquina y no se
+     * pisan, porque sólo se carga el archivo del entorno activo.
+     */
+    public function testOnlyTheActiveEnvFileIsLoaded(): void
     {
         $_ENV['APP_ENV'] = 'test';
+        $test = Loader::load(self::CASCADE);
 
-        $config = Loader::load(self::CASCADE);
+        $_ENV['APP_ENV'] = 'dev';
+        $dev = Loader::load(self::CASCADE);
 
-        // config.php es el último de la cascada.
-        $this->assertEquals('127.0.0.1', $config->get('db.host'));
-        $this->assertTrue($config->get('app.debug'));
+        $this->assertEquals('cascade_test', $test->get('db.dbname'));
+        $this->assertEquals('cascade_dev', $dev->get('db.dbname'));
+
+        // config.dev.php define app.debug; config.test.php no, y no lo hereda.
+        $this->assertTrue($dev->get('app.debug'));
+        $this->assertFalse($test->get('app.debug'));
     }
 
     public function testExplicitEnvArgumentOverridesTheEnvironment(): void
@@ -105,12 +112,43 @@ final class LoaderTest extends TestCase
 
     public function testMissingEnvFileIsNotAnError(): void
     {
-        $_ENV['APP_ENV'] = 'staging';
+        $_ENV['APP_ENV'] = 'prod';
 
         $config = Loader::load(self::CASCADE);
 
-        $this->assertEquals('dev', $config->get('app.env'));
+        // No hay config.prod.php en el fixture: queda common tal cual.
         $this->assertEquals('cascade', $config->get('db.dbname'));
+        $this->assertEquals(3306, $config->get('db.port'));
+    }
+
+    public function testUnknownEnvIsRejected(): void
+    {
+        $_ENV['APP_ENV'] = 'staging';
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage("APP_ENV inválido: 'staging'");
+
+        Loader::load(self::CASCADE);
+    }
+
+    /** @return array<string, array{string, string}> */
+    public static function aliasProvider(): array
+    {
+        return [
+            'production' => ['production', 'prod'],
+            'PROD'       => ['PROD', 'prod'],
+            'testing'    => ['testing', 'test'],
+            'development'=> ['development', 'dev'],
+            'con espacios' => ['  prod  ', 'prod'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('aliasProvider')]
+    public function testEnvAliasesAreNormalized(string $given, string $expected): void
+    {
+        $_ENV['APP_ENV'] = $given;
+
+        $this->assertEquals($expected, Loader::resolveEnv());
     }
 
     /**
@@ -131,15 +169,15 @@ final class LoaderTest extends TestCase
     }
 
     /**
-     * Un APP_ENV con separadores de path no puede terminar cargando un archivo
-     * de otro directorio.
+     * La lista blanca de entornos deja fuera, de paso, cualquier intento de
+     * armar un path hacia otro directorio.
      */
-    public function testEnvWithPathSeparatorsIsIgnored(): void
+    public function testEnvWithPathSeparatorsIsRejected(): void
     {
         $_ENV['APP_ENV'] = '../../etc/passwd';
 
-        $config = Loader::load(self::CASCADE);
+        $this->expectException(\RuntimeException::class);
 
-        $this->assertEquals('dev', $config->get('app.env'));
+        Loader::load(self::CASCADE);
     }
 }
