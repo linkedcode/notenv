@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Los tests de integración corren contra MySQL de verdad y no SQLite: el
+    # schema lo arman las migraciones del paquete, que son SQL de MySQL
+    # (AUTO_INCREMENT, ENGINE=InnoDB, POINT, DROP FOREIGN KEY). Ver el comentario
+    # de Linkedcode\Infra\Testing\TestDatabase.
+    #
+    # El 3307 y root/test replican el docker de desarrollo
+    # (/var/www/docker/services/mysql-test/compose.yml), porque varios TestCase
+    # traen ese host y ese puerto hardcodeados. Las bases no se crean acá: cada
+    # suite hace DROP/CREATE DATABASE de la suya.
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -ptest"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo, pdo_mysql, gd, intl
+          coverage: none
+
+      # Las deps linkedcode/* se resuelven por VCS contra repos privados, así
+      # que sin esta clave composer no puede clonarlas. Cargar el secret como
+      # SSH_PRIVATE_KEY en cada repo.
+      - name: Configurar SSH para repos privados
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        if: env.SSH_KEY != ''
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.json') }}
+          restore-keys: composer-${{ runner.os }}-
+
+      - name: Instalar dependencias
+        run: composer install --no-interaction --no-progress
+
+      - name: Esperar a MySQL
+        run: |
+          for i in $(seq 1 30); do
+            mysqladmin ping -h 127.0.0.1 -P 3307 -uroot -ptest --silent && exit 0
+            sleep 2
+          done
+          echo "MySQL no respondió a tiempo" >&2
+          exit 1
+
+      - name: PHPStan
+        run: vendor/bin/phpstan analyse --no-progress
+
+      - name: PHPUnit
+        run: vendor/bin/phpunit --no-coverage

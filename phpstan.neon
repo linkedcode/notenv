@@ -1,0 +1,7 @@
+# Nivel fijado en el máximo que el paquete ya pasa sin errores, para que el
+# análisis sea una barrera contra regresiones desde el día uno. Subirlo es
+# trabajo aparte: elevar el número y corregir lo que aparezca.
+parameters:
+    level: 5
+    paths:
+        - src
