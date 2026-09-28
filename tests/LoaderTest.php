@@ -110,6 +110,13 @@ final class LoaderTest extends TestCase
         $this->assertEquals('cascade_test', $config->get('db.dbname'));
     }
 
+    public function testVariablesInConfigFilesDoNotLeakIntoTheLoader(): void
+    {
+        $config = Loader::load(__DIR__ . '/fixtures/env-leak', 'test');
+
+        $this->assertEquals('leak_test', $config->get('db.dbname'));
+    }
+
     public function testMissingEnvFileIsNotAnError(): void
     {
         $_ENV['APP_ENV'] = 'prod';

@@ -53,15 +53,25 @@ final class Loader
             throw new \RuntimeException("Archivo common.php no encontrado en config/");
         }
 
-        $config = require $commonFile;
+        $config = self::requireFile($commonFile);
 
         $envFile = $configPath . '/config.' . self::resolveEnv($env) . '.php';
 
         if (file_exists($envFile)) {
-            $config = Merger::merge($config, require $envFile);
+            $config = Merger::merge($config, self::requireFile($envFile));
         }
 
         return new Config($config);
+    }
+
+    /**
+     * require en un scope propio: si corriera dentro de load(), un
+     * `$env = ...` en common.php pisaría el parámetro $env antes de elegir
+     * config.<env>.php.
+     */
+    private static function requireFile(string $file): array
+    {
+        return (static fn (): array => require $file)();
     }
 
     /**
